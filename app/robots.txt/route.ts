@@ -3,6 +3,8 @@ export const dynamic = 'force-static';
 export function GET() {
   const body = `User-agent: *
 Allow: /
+Disallow: /admin
+Disallow: /api/
 
 Sitemap: https://blog.retwork.jp/sitemap.xml
 `;

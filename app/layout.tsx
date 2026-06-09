@@ -81,6 +81,7 @@ img { max-width: 100%; height: auto; display: block; border-radius: 8px; }
 .post-body ul, .post-body ol { padding-left: 24px; margin: 0 0 16px; }
 .post-body li { margin-bottom: 6px; }
 .post-body blockquote { border-left: 4px solid var(--accent); margin: 20px 0; padding: 8px 16px; background: var(--surface); color: var(--text-2); border-radius: 4px; }
+.post-body .callout { background: #FDF6EF; border: 1px solid #F3D9C2; border-radius: 12px; padding: 16px 18px; margin: 20px 0; color: var(--text-1); }
 .post-body table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
 .post-body th, .post-body td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 .post-body th { background: var(--tag-bg); font-weight: 700; }
