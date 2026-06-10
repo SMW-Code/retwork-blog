@@ -104,6 +104,47 @@ function fileToBase64(file: File): Promise<string> {
 function esc(s: string) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function unesc(s: string) { return (s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'); }
 
+/* 업로드 전 이미지 자동 압축
+   - 최대 변 1600px (작으면 그대로)
+   - JPEG quality 85
+   - 5MB 사진 → 보통 200~500KB
+   - Vercel API Route 의 4.5MB 본문 한계 회피 */
+function compressImage(file: File, maxDim = 1600, quality = 0.85): Promise<File> {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) { resolve(file); return; }
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => {
+      try {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > maxDim || h > maxDim) {
+          if (w >= h) { h = Math.round((h * maxDim) / w); w = maxDim; }
+          else { w = Math.round((w * maxDim) / h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { URL.revokeObjectURL(url); resolve(file); return; }
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(url);
+          if (!blob) { resolve(file); return; }
+          if (blob.size >= file.size) { resolve(file); return; }  // 원본이 더 작으면 그대로
+          const newName = file.name.replace(/\.\w+$/, '') + '.jpg';
+          resolve(new File([blob], newName, { type: 'image/jpeg' }));
+        }, 'image/jpeg', quality);
+      } catch {
+        URL.revokeObjectURL(url);
+        resolve(file);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 /* X 280자 메시지 미리보기 — 서버 /api/sns/x 의 formatTweet 와 동일 로직 */
 function previewTweet({ title, description, url, tags }: { title: string; description: string; url: string; tags: string[] }): string {
   const TWEET_MAX = 280, URL_LEN = 23;
@@ -270,12 +311,24 @@ export default function AdminPage() {
     setBlocks((b) => b.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   }
   function setBlockColor(id: number, c: string) { patchBlock(id, { color: c }); }
-  function setBlockFile(id: number, f?: File) { setBlocks((b) => b.map((x) => (x.id === id ? { ...x, file: f, preview: f ? URL.createObjectURL(f) : x.preview } : x))); }
+  async function setBlockFile(id: number, f?: File) {
+    if (!f) {
+      setBlocks((b) => b.map((x) => (x.id === id ? { ...x, file: undefined } : x)));
+      return;
+    }
+    const compressed = await compressImage(f);
+    setBlocks((b) => b.map((x) => (x.id === id ? { ...x, file: compressed, preview: URL.createObjectURL(compressed) } : x)));
+  }
   function rmBlock(id: number) { setBlocks((b) => b.filter((x) => x.id !== id)); }
   function move(id: number, d: number) {
     setBlocks((b) => { const i = b.findIndex((x) => x.id === id); const j = i + d; if (i < 0 || j < 0 || j >= b.length) return b; const c = [...b]; [c[i], c[j]] = [c[j], c[i]]; return c; });
   }
-  function pickHero(f?: File) { setHero(f); setHeroPreview(f ? URL.createObjectURL(f) : ''); }
+  async function pickHero(f?: File) {
+    if (!f) { setHero(undefined); setHeroPreview(''); return; }
+    const compressed = await compressImage(f);
+    setHero(compressed);
+    setHeroPreview(URL.createObjectURL(compressed));
+  }
 
   /* ---- 새 글 / 목록 ---- */
   function newPost() {
