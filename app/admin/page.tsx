@@ -117,6 +117,20 @@ function previewTweet({ title, description, url, tags }: { title: string; descri
   if (description && rest > 12) body += '\n\n' + clip(description, rest - 2);
   return [body, `→ ${url}`, tagText].filter(Boolean).join('\n\n').trim();
 }
+/* Threads 500자 메시지 미리보기 — 서버 /api/sns/threads 의 formatThread 와 동일 */
+function previewThread({ title, description, url, tags }: { title: string; description: string; url: string; tags: string[] }): string {
+  const MAX = 500;
+  if (!title) return '';
+  const tagText = tags.slice(0, 6).map((t) => `#${t.replace(/\s+/g, '')}`).join(' ');
+  const urlBlock = `\n\n→ ${url}`;
+  const tagBlock = tagText ? `\n\n${tagText}` : '';
+  const free = MAX - jLen(urlBlock) - jLen(tagBlock);
+  const titleClipped = clip(title, Math.min(140, free - 2));
+  let body = titleClipped;
+  const rest = free - jLen(body);
+  if (description && rest > 20) body += '\n\n' + clip(description, rest - 2);
+  return body + urlBlock + tagBlock;
+}
 function clip(s: string, max: number): string {
   if (jLen(s) <= max) return s;
   return [...s].slice(0, Math.max(0, max - 1)).join('') + '…';
@@ -229,9 +243,14 @@ export default function AdminPage() {
   const [mdPreview, setMdPreview] = useState('');
   // X 자동 게시 옵션
   const [snsX, setSnsX] = useState(true);
-  const [snsXCustom, setSnsXCustom] = useState('');           // 비우면 자동 생성
-  const [snsXEditOpen, setSnsXEditOpen] = useState(false);    // 직접 작성 펼침
+  const [snsXCustom, setSnsXCustom] = useState('');
+  const [snsXEditOpen, setSnsXEditOpen] = useState(false);
   const [snsXResult, setSnsXResult] = useState<{ ok: boolean; tweetUrl?: string | null; error?: string; text?: string } | null>(null);
+  // Threads 자동 게시 옵션
+  const [snsThreads, setSnsThreads] = useState(true);
+  const [snsThreadsCustom, setSnsThreadsCustom] = useState('');
+  const [snsThreadsEditOpen, setSnsThreadsEditOpen] = useState(false);
+  const [snsThreadsResult, setSnsThreadsResult] = useState<{ ok: boolean; threadUrl?: string | null; error?: string; text?: string } | null>(null);
 
   const tags = tagsRaw.split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -263,6 +282,7 @@ export default function AdminPage() {
     setTheme(DEFAULT_THEME);
     setStatus('idle'); setMessage(''); setMode('edit');
     setSnsX(true); setSnsXResult(null);   // 새 글: X 자동 게시 기본 ON
+    setSnsThreads(true); setSnsThreadsResult(null);
   }
   async function loadList() {
     setMode('list'); setListLoading(true); setListError('');
@@ -288,7 +308,8 @@ export default function AdminPage() {
       setBlocks(p.blocks); setNextId(p.nextId);
       setTheme(isThemeKey(p.fm.theme) ? p.fm.theme : DEFAULT_THEME);
       setStatus('idle'); setMessage(''); setMode('edit');
-      setSnsX(false); setSnsXResult(null);   // 수정 모드: X 자동 게시 기본 OFF (중복 트윗 차단 회피)
+      setSnsX(false); setSnsXResult(null);   // 수정 모드: X 자동 게시 기본 OFF (중복 차단 회피)
+      setSnsThreads(false); setSnsThreadsResult(null);
     } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
   }
   async function delPost(s: string) {
@@ -366,7 +387,7 @@ export default function AdminPage() {
 
   async function publish() {
     if (!canPublish) { setStatus('error'); setMessage('제목/주소/검색설명/본문을 채워주세요. (본문 50자 이상)'); return; }
-    setStatus('publishing'); setMessage(''); setSnsXResult(null);
+    setStatus('publishing'); setMessage(''); setSnsXResult(null); setSnsThreadsResult(null);
     try {
       const { markdown, images } = await buildPost();
       const res = await fetch('/api/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, slug, markdown, images }) });
@@ -374,24 +395,30 @@ export default function AdminPage() {
       if (!data.ok) { setStatus('error'); setMessage(data.error || '발행 실패'); return; }
       setStatus('done'); setResultUrl(data.url); setEditingSlug(slug);
 
-      // 발행 성공 후 X 자동 게시 (옵션)
+      const postUrl = data.url || `https://blog.retwork.jp/posts/${slug}`;
+      const commonPayload = { password, title, description: desc, url: postUrl, tags };
+
+      // 발행 성공 후 SNS 자동 게시 (병렬)
+      const tasks: Promise<unknown>[] = [];
       if (snsX) {
-        const postUrl = data.url || `https://blog.retwork.jp/posts/${slug}`;
-        try {
-          const xr = await fetch('/api/sns/x', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              password, title, description: desc, url: postUrl, tags,
-              customText: snsXEditOpen ? snsXCustom : undefined,
-            }),
-          });
-          const xd = await xr.json();
-          setSnsXResult(xd);
-        } catch (e) {
-          setSnsXResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
-        }
+        tasks.push(
+          fetch('/api/sns/x', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...commonPayload, customText: snsXEditOpen ? snsXCustom : undefined }),
+          }).then((r) => r.json()).then((xd) => setSnsXResult(xd))
+            .catch((e) => setSnsXResult({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+        );
       }
+      if (snsThreads) {
+        tasks.push(
+          fetch('/api/sns/threads', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...commonPayload, customText: snsThreadsEditOpen ? snsThreadsCustom : undefined }),
+          }).then((r) => r.json()).then((td) => setSnsThreadsResult(td))
+            .catch((e) => setSnsThreadsResult({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+        );
+      }
+      await Promise.all(tasks);
     } catch (e) { setStatus('error'); setMessage(e instanceof Error ? e.message : String(e)); }
   }
 
@@ -490,6 +517,12 @@ export default function AdminPage() {
       )}
       {snsXResult && !snsXResult.ok && (
         <div className="adm-banner bad">🐦 X 게시 실패: {snsXResult.error}</div>
+      )}
+      {snsThreadsResult && snsThreadsResult.ok && (
+        <div className="adm-banner ok">🧵 Threads 게시 완료 {snsThreadsResult.threadUrl && <>→ <a href={snsThreadsResult.threadUrl} target="_blank" rel="noopener">{snsThreadsResult.threadUrl}</a></>}</div>
+      )}
+      {snsThreadsResult && !snsThreadsResult.ok && (
+        <div className="adm-banner bad">🧵 Threads 게시 실패: {snsThreadsResult.error}</div>
       )}
       {status === 'error' && <div className="adm-banner bad">⚠️ {message}</div>}
 
@@ -611,7 +644,41 @@ export default function AdminPage() {
                   </div>
                 )}
                 <div className="adm-desc" style={{ marginTop: 8, fontSize: 11 }}>
-                  💡 X API 토큰 4개를 Vercel 환경변수에 등록해야 작동합니다 — README 참고
+                  💡 X API 토큰 4개를 Vercel 환경변수에 등록해야 작동합니다.
+                </div>
+              </div>
+            )}
+
+            {/* Threads */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 9, background: snsThreads ? '#E6F5EF' : '#fff', marginTop: 10 }}>
+              <input type="checkbox" checked={snsThreads} onChange={(e) => setSnsThreads(e.target.checked)} />
+              <span>🧵 <b>Threads</b> 에 자동 게시</span>
+            </label>
+            {snsThreads && (
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="adm-btn mini" onClick={() => setSnsThreadsEditOpen((v) => !v)} style={{ marginBottom: 6 }}>
+                  {snsThreadsEditOpen ? '▲ 자동 메시지로 돌아가기' : '✏️ 메시지 직접 작성하기'}
+                </button>
+                {snsThreadsEditOpen ? (
+                  <>
+                    <textarea
+                      className="adm-in" rows={6}
+                      value={snsThreadsCustom}
+                      onChange={(e) => setSnsThreadsCustom(e.target.value)}
+                      placeholder="Threads 에 그대로 올라갈 본문 (URL/태그 직접 포함)"
+                      maxLength={500}
+                    />
+                    <div className="adm-cnt" style={{ color: jLen(snsThreadsCustom) > 500 ? '#E24B4A' : 'var(--text-3)' }}>
+                      {jLen(snsThreadsCustom)} / 500자
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ background: '#fbfaf7', border: '1px solid var(--border)', borderRadius: 8, padding: 10, fontSize: 12, lineHeight: 1.5, color: 'var(--text-2)', whiteSpace: 'pre-wrap' }}>
+                    {previewThread({ title, description: desc, url: `https://blog.retwork.jp/posts/${slug || '(주소)'}`, tags }) || '제목·검색설명·태그를 채우면 자동 생성됩니다.'}
+                  </div>
+                )}
+                <div className="adm-desc" style={{ marginTop: 8, fontSize: 11 }}>
+                  💡 Threads 토큰 2개 (THREADS_USER_ID / THREADS_ACCESS_TOKEN) 를 Vercel 환경변수에 등록해야 작동합니다.
                 </div>
               </div>
             )}
