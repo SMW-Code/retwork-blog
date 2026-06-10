@@ -81,7 +81,19 @@ img { max-width: 100%; height: auto; display: block; border-radius: 8px; }
 .post-body ul, .post-body ol { padding-left: 24px; margin: 0 0 16px; }
 .post-body li { margin-bottom: 6px; }
 .post-body blockquote { border-left: 4px solid var(--accent); margin: 20px 0; padding: 8px 16px; background: var(--surface); color: var(--text-2); border-radius: 4px; }
-.post-body .callout { background: #FDF6EF; border: 1px solid #F3D9C2; border-radius: 12px; padding: 16px 18px; margin: 20px 0; color: var(--text-1); }
+/* 강조 카드 — 기본 (색상 미지정) : 무난한 베이지 */
+.post-body .callout { background: #f5f1ea; border-left: 4px solid #b0a99a; border-radius: 0 12px 12px 0; padding: 14px 18px; margin: 20px 0; color: var(--text-1); }
+/* 메인앱 10가지 테마와 동일한 색상 팔레트 (배경=light, 좌측 보더=color) */
+.post-body .callout.callout-color-green   { background: #E0ECEA; border-left-color: #00644D; }
+.post-body .callout.callout-color-blue    { background: #E1EFFE; border-left-color: #0279F7; }
+.post-body .callout.callout-color-purple  { background: #E7E0F2; border-left-color: #380193; }
+.post-body .callout.callout-color-coral   { background: #FFF0EB; border-left-color: #F78156; }
+.post-body .callout.callout-color-rose    { background: #FDF3FA; border-left-color: #F198D5; }
+.post-body .callout.callout-color-gold    { background: #FFFAE0; border-left-color: #FFDE02; }
+.post-body .callout.callout-color-indigo  { background: #E3E6EB; border-left-color: #172C58; }
+.post-body .callout.callout-color-cyan    { background: #E5ECF0; border-left-color: #266586; }
+.post-body .callout.callout-color-lime    { background: #E7F9E7; border-left-color: #38CF39; }
+.post-body .callout.callout-color-magenta { background: #FCE1F0; border-left-color: #E30884; }
 .post-body table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
 .post-body th, .post-body td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 .post-body th { background: var(--tag-bg); font-weight: 700; }

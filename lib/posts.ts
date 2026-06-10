@@ -7,6 +7,8 @@ import remarkGfm from 'remark-gfm';
 
 const POSTS_DIR = path.join(process.cwd(), 'posts');
 
+import { isThemeKey, type ThemeKey, DEFAULT_THEME } from './themes';
+
 export type PostMeta = {
   slug: string;
   title: string;
@@ -15,6 +17,7 @@ export type PostMeta = {
   image?: string;
   tags?: string[];
   author?: string;
+  theme?: ThemeKey;       // 글 전체 테마색 (--accent). 미지정 시 기본
 };
 
 export type Post = PostMeta & { contentHtml: string };
@@ -42,6 +45,7 @@ export function getAllPosts(): PostMeta[] {
       image: data.image || '',
       tags: data.tags || [],
       author: data.author || 'RetWork編集部',
+      theme: isThemeKey(data.theme) ? data.theme : DEFAULT_THEME,
     } as PostMeta;
   });
   posts.sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -62,6 +66,7 @@ export async function getPostBySlug(slug: string): Promise<Post | null> {
     image: data.image || '',
     tags: data.tags || [],
     author: data.author || 'RetWork編集部',
+    theme: isThemeKey(data.theme) ? data.theme : DEFAULT_THEME,
     contentHtml: processed.toString(),
   };
 }

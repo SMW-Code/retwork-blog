@@ -1,13 +1,19 @@
 'use client';
 
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
+import { THEMES, THEME_KEYS, DEFAULT_THEME, isThemeKey, type ThemeKey } from '../../lib/themes';
 
 /* ────────────────────────────────────────────────────────────
    /admin — 그루메 블로그 글쓰기 (작성 / 목록 / 수정 / 삭제)
    ──────────────────────────────────────────────────────────── */
 
 type BlockType = 'heading' | 'text' | 'card' | 'quote' | 'image';
-type Block = { id: number; type: BlockType; text: string; file?: File; preview?: string; existingUrl?: string };
+type Block = {
+  id: number; type: BlockType; text: string;
+  file?: File; preview?: string; existingUrl?: string;
+  color?: ThemeKey;                      // 강조 카드 색상 (card 블록에서만 사용)
+};
 type PostItem = { slug: string; title: string; date: string };
 
 const TYPE_NAME: Record<BlockType, string> = {
@@ -55,8 +61,17 @@ function parseMarkdown(md: string) {
     raw = raw.trim(); if (!raw) continue;
     let blk: Omit<Block, 'id'>;
     if (raw.startsWith('## ')) blk = { type: 'heading', text: raw.slice(3).trim() };
-    else if (raw.startsWith('<div class="callout">'))
-      blk = { type: 'card', text: unesc(raw.replace(/^<div class="callout">/, '').replace(/<\/div>\s*$/, '').replace(/<br\s*\/?>/g, '\n')) };
+    else if (/^<div class="callout(?:\s+callout-color-\w+)?">/.test(raw)) {
+      // 색상 추출 (없으면 undefined)
+      const mc = raw.match(/^<div class="callout(?:\s+callout-color-([a-z]+))?">([\s\S]*?)<\/div>\s*$/);
+      const colorRaw = mc?.[1];
+      const inner = mc?.[2] || raw.replace(/^<div class="callout[^"]*">/, '').replace(/<\/div>\s*$/, '');
+      blk = {
+        type: 'card',
+        text: unesc(inner.replace(/<br\s*\/?>/g, '\n')),
+        color: isThemeKey(colorRaw) ? colorRaw : undefined,
+      };
+    }
     else if (/^!\[[^\]]*\]\([^)]*\)$/.test(raw)) {
       const mm = raw.match(/^!\[([^\]]*)\]\(([^)]*)\)$/);
       blk = { type: 'image', text: mm ? mm[1] : '', existingUrl: mm ? mm[2] : '' };
@@ -84,6 +99,7 @@ export default function AdminPage() {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [nextId, setNextId] = useState(1);
   const [date] = useState(() => new Date().toISOString().slice(0, 10));
+  const [theme, setTheme] = useState<ThemeKey>(DEFAULT_THEME);   // 글 전체 테마색
 
   const [status, setStatus] = useState<'idle' | 'publishing' | 'done' | 'error'>('idle');
   const [message, setMessage] = useState('');
@@ -96,8 +112,14 @@ export default function AdminPage() {
   const tags = tagsRaw.split(',').map((s) => s.trim()).filter(Boolean);
 
   /* ---- 블록 ---- */
-  function addBlock(type: BlockType) { setBlocks((b) => [...b, { id: nextId, type, text: '' }]); setNextId((n) => n + 1); }
+  function addBlock(type: BlockType) {
+    setBlocks((b) => [...b, { id: nextId, type, text: '', ...(type === 'card' ? { color: theme } : {}) }]);
+    setNextId((n) => n + 1);
+  }
   function setText(id: number, v: string) { setBlocks((b) => b.map((x) => (x.id === id ? { ...x, text: v } : x))); }
+  function setBlockColor(id: number, c: ThemeKey) {
+    setBlocks((b) => b.map((x) => (x.id === id ? { ...x, color: c } : x)));
+  }
   function setBlockFile(id: number, f?: File) { setBlocks((b) => b.map((x) => (x.id === id ? { ...x, file: f, preview: f ? URL.createObjectURL(f) : x.preview } : x))); }
   function rmBlock(id: number) { setBlocks((b) => b.filter((x) => x.id !== id)); }
   function move(id: number, d: number) {
@@ -109,6 +131,7 @@ export default function AdminPage() {
   function newPost() {
     setEditingSlug(null); setSlug(''); setTitle(''); setDesc(''); setTagsRaw('');
     setHero(undefined); setHeroPreview(''); setHeroExistingUrl(''); setBlocks([]); setNextId(1);
+    setTheme(DEFAULT_THEME);
     setStatus('idle'); setMessage(''); setMode('edit');
   }
   async function loadList() {
@@ -133,6 +156,7 @@ export default function AdminPage() {
       setTagsRaw(Array.isArray(p.fm.tags) ? (p.fm.tags as string[]).join(', ') : (p.fm.tags as string) || '');
       setHero(undefined); setHeroPreview(''); setHeroExistingUrl((p.fm.image as string) || '');
       setBlocks(p.blocks); setNextId(p.nextId);
+      setTheme(isThemeKey(p.fm.theme) ? p.fm.theme : DEFAULT_THEME);
       setStatus('idle'); setMessage(''); setMode('edit');
     } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
   }
@@ -157,7 +181,10 @@ export default function AdminPage() {
     for (const b of blocks) {
       if (b.type === 'heading') parts.push(`## ${b.text || ''}`);
       else if (b.type === 'text') parts.push(b.text || '');
-      else if (b.type === 'card') parts.push(`<div class="callout">${esc(b.text || '').replace(/\n/g, '<br>')}</div>`);
+      else if (b.type === 'card') {
+        const cls = b.color ? `callout callout-color-${b.color}` : 'callout';
+        parts.push(`<div class="${cls}">${esc(b.text || '').replace(/\n/g, '<br>')}</div>`);
+      }
       else if (b.type === 'quote') parts.push(`> ${(b.text || '').replace(/\n/g, '\n> ')}`);
       else if (b.type === 'image') {
         const alt = (b.text || '').replace(/[[\]]/g, '');
@@ -168,7 +195,9 @@ export default function AdminPage() {
     const fm = [
       '---', `title: ${JSON.stringify(title)}`, `date: ${JSON.stringify(date)}`,
       `description: ${JSON.stringify(desc)}`, `image: ${JSON.stringify(heroPath)}`,
-      `tags: [${tags.map((t) => JSON.stringify(t)).join(', ')}]`, `author: ${JSON.stringify('RetWork編集部')}`, '---', '',
+      `tags: [${tags.map((t) => JSON.stringify(t)).join(', ')}]`, `author: ${JSON.stringify('RetWork編集部')}`,
+      `theme: ${JSON.stringify(theme)}`,
+      '---', '',
     ].join('\n');
     return { markdown: fm + parts.join('\n\n') + '\n', images };
   }
@@ -268,8 +297,14 @@ export default function AdminPage() {
 
   /* ════════ 에디터 화면 ════════ */
   const heroSrc = heroPreview || heroExistingUrl;
+  const themeObj = THEMES[theme];
+  // 에디터 전체에 선택한 테마색을 라이브 반영 (--accent / --accent-dark)
+  const rootStyle = {
+    '--accent': themeObj.color,
+    '--accent-dark': themeObj.dark,
+  } as CSSProperties;
   return (
-    <div className="adm-root">
+    <div className="adm-root" style={rootStyle}>
       <Style />{TopBar}
       {editingSlug && <div className="adm-banner edit">✏️ 기존 글 수정 중: <b>{editingSlug}</b> (발행하면 덮어써져요)</div>}
       {status === 'done' && <div className="adm-banner ok">✅ 발행됐어요! 약 1분 후 반영 → <a href={resultUrl} target="_blank" rel="noopener">{resultUrl}</a></div>}
@@ -303,6 +338,9 @@ export default function AdminPage() {
             <label className="adm-lab">대표 이미지 <span>SNS 미리보기 이미지</span></label>
             <input type="file" accept="image/*" onChange={(e) => pickHero(e.target.files?.[0])} />
             {heroExistingUrl && !heroPreview && <div className="adm-cnt" style={{ textAlign: 'left' }}>현재: {heroExistingUrl} (바꾸려면 새 파일 선택)</div>}
+
+            <label className="adm-lab">🎨 글 테마 색상 <span>제목 보더·링크·CTA 버튼 등에 적용</span></label>
+            <ColorSwatches value={theme} onChange={setTheme} />
           </div>
 
           <div className="adm-panel">
@@ -333,7 +371,17 @@ export default function AdminPage() {
                     <input className="adm-in" style={{ marginTop: 7 }} value={b.text} onChange={(e) => setText(b.id, e.target.value)} placeholder="이미지 설명(alt) — 검색에 도움" />
                   </>
                 ) : (
-                  <textarea className="adm-in" value={b.text} rows={b.type === 'text' ? 3 : 2} onChange={(e) => setText(b.id, e.target.value)} placeholder={`${TYPE_NAME[b.type]} 내용…`} />
+                  <>
+                    <textarea className="adm-in" value={b.text} rows={b.type === 'text' ? 3 : 2} onChange={(e) => setText(b.id, e.target.value)} placeholder={`${TYPE_NAME[b.type]} 내용…`} />
+                    {b.type === 'card' && (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="adm-lab" style={{ margin: '4px 0 4px' }}>
+                          🎨 강조 카드 색상 <span>이 카드만 적용</span>
+                        </div>
+                        <ColorSwatches value={b.color || theme} onChange={(c) => setBlockColor(b.id, c)} mini />
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             ))}
@@ -352,7 +400,7 @@ export default function AdminPage() {
                 {blocks.map((b) => {
                   if (b.type === 'heading') return <h2 key={b.id}>{b.text || '소제목'}</h2>;
                   if (b.type === 'text') return <p key={b.id}>{b.text || '본문…'}</p>;
-                  if (b.type === 'card') return <div className="callout" key={b.id}>{b.text || '강조 내용'}</div>;
+                  if (b.type === 'card') return <div className={`callout callout-color-${b.color || theme}`} key={b.id}>{b.text || '강조 내용'}</div>;
                   if (b.type === 'quote') return <blockquote key={b.id}>{b.text || '인용'}</blockquote>;
                   if (b.type === 'image') { const src = b.preview || b.existingUrl; return src ? <img key={b.id} src={src} alt={b.text} /> : <div key={b.id} style={{ background: '#eee', borderRadius: 8, padding: 30, textAlign: 'center', color: '#aaa' }}>이미지 자리</div>; }
                   return null;
@@ -383,6 +431,36 @@ function Counter({ v, min, max }: { v: string; min: number; max: number }) {
   const col = n === 0 ? 'var(--text-3)' : n < min || n > max ? '#E8A33A' : 'var(--accent)';
   const msg = n === 0 ? '' : n < min ? '조금 짧아요' : n > max ? '조금 길어요' : '적당해요 👍';
   return <div className="adm-cnt" style={{ color: col }}>{n}자 {msg}</div>;
+}
+
+/* 색상 칩 스워치 — 메인앱 10개 테마 중 선택 */
+function ColorSwatches({ value, onChange, mini }: { value: ThemeKey; onChange: (k: ThemeKey) => void; mini?: boolean }) {
+  const sz = mini ? 22 : 28;
+  return (
+    <div className="adm-swatches" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+      {THEME_KEYS.map((k) => {
+        const th = THEMES[k];
+        const on = value === k;
+        return (
+          <button
+            key={k}
+            type="button"
+            title={th.name}
+            onClick={() => onChange(k)}
+            aria-label={th.name}
+            style={{
+              width: sz, height: sz, borderRadius: '50%',
+              background: th.color,
+              border: on ? '2.5px solid #1c1c1c' : '2px solid #fff',
+              outline: on ? '1.5px solid #fff' : 'none',
+              boxShadow: on ? '0 0 0 2px ' + th.color + ' , 0 1px 4px rgba(0,0,0,.18)' : '0 1px 3px rgba(0,0,0,.12)',
+              cursor: 'pointer', padding: 0, transition: '.12s',
+            }}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 function Style() {
@@ -425,6 +503,18 @@ function Style() {
     .adm-listrow{display:flex;align-items:center;gap:10px;padding:12px 4px;border-bottom:1px solid #F2F0EA;}
     .adm-lt{font-size:14px;font-weight:700;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .adm-ls{font-size:11px;color:var(--text-3);margin-top:2px;}
-    .callout{background:#FDF6EF;border:1px solid #F3D9C2;border-radius:12px;padding:14px 16px;margin:14px 0;}
+    /* 미리보기 강조 카드 — 기본 (색상 미지정) */
+    .callout{background:#f5f1ea;border-left:4px solid #b0a99a;border-radius:0 12px 12px 0;padding:14px 16px;margin:14px 0;}
+    /* 10가지 테마 색상 — 메인앱 팔레트 동기화 */
+    .callout.callout-color-green   {background:#E0ECEA;border-left-color:#00644D;}
+    .callout.callout-color-blue    {background:#E1EFFE;border-left-color:#0279F7;}
+    .callout.callout-color-purple  {background:#E7E0F2;border-left-color:#380193;}
+    .callout.callout-color-coral   {background:#FFF0EB;border-left-color:#F78156;}
+    .callout.callout-color-rose    {background:#FDF3FA;border-left-color:#F198D5;}
+    .callout.callout-color-gold    {background:#FFFAE0;border-left-color:#FFDE02;}
+    .callout.callout-color-indigo  {background:#E3E6EB;border-left-color:#172C58;}
+    .callout.callout-color-cyan    {background:#E5ECF0;border-left-color:#266586;}
+    .callout.callout-color-lime    {background:#E7F9E7;border-left-color:#38CF39;}
+    .callout.callout-color-magenta {background:#FCE1F0;border-left-color:#E30884;}
   `}} />;
 }

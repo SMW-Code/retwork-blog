@@ -1,8 +1,10 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getAllSlugs, getPostBySlug } from '../../../lib/posts';
+import { getTheme } from '../../../lib/themes';
 import AdSlot from '../../../components/AdSlot';
 import type { Metadata } from 'next';
+import type { CSSProperties } from 'react';
 
 export const dynamic = 'force-static';
 export const dynamicParams = false;
@@ -44,8 +46,15 @@ export default async function PostPage(
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
+  // 글 frontmatter 의 theme 키 → --accent / --accent-dark 를 그 색으로 변경
+  const theme = getTheme(post.theme);
+  const themeStyle = {
+    '--accent': theme.color,
+    '--accent-dark': theme.dark,
+  } as CSSProperties;
+
   return (
-    <article>
+    <article style={themeStyle}>
       <Link href="/" style={{ fontSize: 13, color: 'var(--text-3)' }}>← 記事一覧に戻る</Link>
 
       <h1 className="post-hero">{post.title}</h1>
