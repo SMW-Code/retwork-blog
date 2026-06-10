@@ -104,6 +104,24 @@ function fileToBase64(file: File): Promise<string> {
 function esc(s: string) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function unesc(s: string) { return (s || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'); }
 
+/* X 280자 메시지 미리보기 — 서버 /api/sns/x 의 formatTweet 와 동일 로직 */
+function previewTweet({ title, description, url, tags }: { title: string; description: string; url: string; tags: string[] }): string {
+  const TWEET_MAX = 280, URL_LEN = 23;
+  if (!title) return '';
+  const tagText = tags.slice(0, 4).map((t) => `#${t.replace(/\s+/g, '')}`).join(' ');
+  const fixed = URL_LEN + 4 + (tagText ? 1 + jLen(tagText) : 0);
+  const free = TWEET_MAX - fixed;
+  const titleClipped = clip(title, Math.min(80, free - 2));
+  let body = titleClipped;
+  const rest = free - jLen(body);
+  if (description && rest > 12) body += '\n\n' + clip(description, rest - 2);
+  return [body, `→ ${url}`, tagText].filter(Boolean).join('\n\n').trim();
+}
+function clip(s: string, max: number): string {
+  if (jLen(s) <= max) return s;
+  return [...s].slice(0, Math.max(0, max - 1)).join('') + '…';
+}
+
 /* markdown(원문) → 필드 + 블록 으로 역파싱 (수정용) */
 function parseMarkdown(md: string) {
   const m = md.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -209,6 +227,11 @@ export default function AdminPage() {
   const [listError, setListError] = useState('');
   const [mdExpanded, setMdExpanded] = useState(false);
   const [mdPreview, setMdPreview] = useState('');
+  // X 자동 게시 옵션
+  const [snsX, setSnsX] = useState(true);
+  const [snsXCustom, setSnsXCustom] = useState('');           // 비우면 자동 생성
+  const [snsXEditOpen, setSnsXEditOpen] = useState(false);    // 직접 작성 펼침
+  const [snsXResult, setSnsXResult] = useState<{ ok: boolean; tweetUrl?: string | null; error?: string; text?: string } | null>(null);
 
   const tags = tagsRaw.split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -341,13 +364,32 @@ export default function AdminPage() {
 
   async function publish() {
     if (!canPublish) { setStatus('error'); setMessage('제목/주소/검색설명/본문을 채워주세요. (본문 50자 이상)'); return; }
-    setStatus('publishing'); setMessage('');
+    setStatus('publishing'); setMessage(''); setSnsXResult(null);
     try {
       const { markdown, images } = await buildPost();
       const res = await fetch('/api/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password, slug, markdown, images }) });
       const data = await res.json();
       if (!data.ok) { setStatus('error'); setMessage(data.error || '발행 실패'); return; }
       setStatus('done'); setResultUrl(data.url); setEditingSlug(slug);
+
+      // 발행 성공 후 X 자동 게시 (옵션)
+      if (snsX) {
+        const postUrl = data.url || `https://blog.retwork.jp/posts/${slug}`;
+        try {
+          const xr = await fetch('/api/sns/x', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              password, title, description: desc, url: postUrl, tags,
+              customText: snsXEditOpen ? snsXCustom : undefined,
+            }),
+          });
+          const xd = await xr.json();
+          setSnsXResult(xd);
+        } catch (e) {
+          setSnsXResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
     } catch (e) { setStatus('error'); setMessage(e instanceof Error ? e.message : String(e)); }
   }
 
@@ -441,6 +483,12 @@ export default function AdminPage() {
       <Style />{TopBar}
       {editingSlug && <div className="adm-banner edit">✏️ 기존 글 수정 중: <b>{editingSlug}</b> (발행하면 덮어써져요)</div>}
       {status === 'done' && <div className="adm-banner ok">✅ 발행됐어요! 약 1분 후 반영 → <a href={resultUrl} target="_blank" rel="noopener">{resultUrl}</a></div>}
+      {snsXResult && snsXResult.ok && (
+        <div className="adm-banner ok">🐦 X 게시 완료 → <a href={snsXResult.tweetUrl || '#'} target="_blank" rel="noopener">{snsXResult.tweetUrl}</a></div>
+      )}
+      {snsXResult && !snsXResult.ok && (
+        <div className="adm-banner bad">🐦 X 게시 실패: {snsXResult.error}</div>
+      )}
       {status === 'error' && <div className="adm-banner bad">⚠️ {message}</div>}
 
       <div className="adm-wrap">
@@ -488,6 +536,7 @@ export default function AdminPage() {
               <button className="adm-btn" onClick={() => addBlock('line')}>＋ 라인</button>
             </div>
             {blocks.length === 0 && <p className="adm-desc">아직 블록이 없어요. 위 버튼으로 추가하세요.</p>}
+            {/* ___ 본문 블록 목록 ___ */}
             {blocks.map((b) => (
               <div className="adm-block" key={b.id}>
                 <div className="adm-bhead">
@@ -520,6 +569,44 @@ export default function AdminPage() {
                 )}
               </div>
             ))}
+          </div>
+
+          {/* ③ SNS 자동 게시 */}
+          <div className="adm-panel">
+            <h2 className="adm-h">③ SNS 자동 공유 <span className="adm-auto">옵션</span></h2>
+            <p className="adm-desc">발행과 동시에 SNS 에도 자동 게시. 비워두면 자동 메시지 생성.</p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 9, background: snsX ? '#E6F5EF' : '#fff' }}>
+              <input type="checkbox" checked={snsX} onChange={(e) => setSnsX(e.target.checked)} />
+              <span>🐦 <b>X (트위터)</b> 에 자동 게시</span>
+            </label>
+            {snsX && (
+              <div style={{ marginTop: 10 }}>
+                <button type="button" className="adm-btn mini" onClick={() => setSnsXEditOpen((v) => !v)} style={{ marginBottom: 6 }}>
+                  {snsXEditOpen ? '▲ 자동 메시지로 돌아가기' : '✏️ 메시지 직접 작성하기'}
+                </button>
+                {snsXEditOpen ? (
+                  <>
+                    <textarea
+                      className="adm-in" rows={5}
+                      value={snsXCustom}
+                      onChange={(e) => setSnsXCustom(e.target.value)}
+                      placeholder="X 에 그대로 올라갈 본문 (URL/태그 직접 포함)"
+                      maxLength={280}
+                    />
+                    <div className="adm-cnt" style={{ color: jLen(snsXCustom) > 280 ? '#E24B4A' : 'var(--text-3)' }}>
+                      {jLen(snsXCustom)} / 280자 (URL 은 23자로 계산됨)
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ background: '#fbfaf7', border: '1px solid var(--border)', borderRadius: 8, padding: 10, fontSize: 12, lineHeight: 1.5, color: 'var(--text-2)', whiteSpace: 'pre-wrap' }}>
+                    {previewTweet({ title, description: desc, url: `https://blog.retwork.jp/posts/${slug || '(주소)'}`, tags }) || '제목·검색설명·태그를 채우면 자동 생성됩니다.'}
+                  </div>
+                )}
+                <div className="adm-desc" style={{ marginTop: 8, fontSize: 11 }}>
+                  💡 X API 토큰 4개를 Vercel 환경변수에 등록해야 작동합니다 — README 참고
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
