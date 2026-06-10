@@ -2,23 +2,88 @@
 
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { THEMES, THEME_KEYS, DEFAULT_THEME, isThemeKey, type ThemeKey } from '../../lib/themes';
+import {
+  THEMES, THEME_KEYS, DEFAULT_THEME, isThemeKey,
+  resolveColor, resolveCardBg, isHexColor,
+  type ThemeKey,
+} from '../../lib/themes';
 
 /* ────────────────────────────────────────────────────────────
    /admin — 그루메 블로그 글쓰기 (작성 / 목록 / 수정 / 삭제)
    ──────────────────────────────────────────────────────────── */
 
-type BlockType = 'heading' | 'text' | 'card' | 'quote' | 'image';
+type BlockType = 'heading' | 'text' | 'card' | 'quote' | 'image' | 'line';
+type FontKind = 'sans' | 'serif';
+type WeightKind = 'thin' | 'normal' | 'bold' | 'extra';
 type Block = {
   id: number; type: BlockType; text: string;
   file?: File; preview?: string; existingUrl?: string;
-  color?: ThemeKey;                      // 강조 카드 색상 (card 블록에서만 사용)
+  // 강조 카드의 배경/보더 색 (테마키 or hex)
+  color?: string;
+  // 폰트 옵션 (heading / text / card 에서 사용)
+  font?: FontKind;
+  size?: number;        // px
+  weight?: WeightKind;
+  textColor?: string;   // 테마키 or hex
+  // 라인 전용
+  lineColor?: string;   // 테마키 or hex
 };
 type PostItem = { slug: string; title: string; date: string };
 
 const TYPE_NAME: Record<BlockType, string> = {
-  heading: '소제목', text: '본문', card: '강조 카드', quote: '인용', image: '이미지',
+  heading: '소제목', text: '본문', card: '강조 카드', quote: '인용', image: '이미지', line: '라인',
 };
+const FONT_FAMILY: Record<FontKind, string> = {
+  sans: "var(--font-ui)",
+  serif: "var(--font-jp)",
+};
+const WEIGHT_VAL: Record<WeightKind, number> = {
+  thin: 300, normal: 400, bold: 700, extra: 900,
+};
+const WEIGHT_LABEL: Record<WeightKind, string> = {
+  thin: '얇게', normal: '표준', bold: '두껍게', extra: '매우두껍게',
+};
+const SIZES = [12, 14, 16, 18, 20, 22, 24, 28];
+
+/* 블록의 스타일 옵션을 inline style 객체로 변환 (미리보기/렌더용) */
+function blockStyle(b: Block): CSSProperties {
+  const s: CSSProperties = {};
+  if (b.font) s.fontFamily = FONT_FAMILY[b.font];
+  if (b.size) s.fontSize = `${b.size}px`;
+  if (b.weight) s.fontWeight = WEIGHT_VAL[b.weight];
+  if (b.textColor) {
+    const c = resolveColor(b.textColor);
+    if (c) s.color = c;
+  }
+  return s;
+}
+/* 블록의 옵션을 markdown용 inline style 문자열로 직렬화 */
+function blockStyleStr(b: Block): string {
+  const parts: string[] = [];
+  if (b.font) parts.push(`font-family:${FONT_FAMILY[b.font]}`);
+  if (b.size) parts.push(`font-size:${b.size}px`);
+  if (b.weight) parts.push(`font-weight:${WEIGHT_VAL[b.weight]}`);
+  if (b.textColor) {
+    const c = resolveColor(b.textColor);
+    if (c) parts.push(`color:${c}`);
+  }
+  return parts.join(';');
+}
+/* style="font-size:20px;color:#xxx" → block 옵션으로 역파싱 */
+function parseStyleAttr(style: string): Partial<Block> {
+  const o: Partial<Block> = {};
+  const m1 = style.match(/font-size\s*:\s*(\d+)px/i); if (m1) o.size = parseInt(m1[1], 10);
+  const m2 = style.match(/font-weight\s*:\s*(\d{3})/i);
+  if (m2) {
+    const n = parseInt(m2[1], 10);
+    o.weight = n >= 900 ? 'extra' : n >= 700 ? 'bold' : n >= 400 ? 'normal' : 'thin';
+  }
+  const m3 = style.match(/font-family\s*:\s*var\(--font-(ui|jp)\)/i);
+  if (m3) o.font = m3[1] === 'jp' ? 'serif' : 'sans';
+  const m4 = style.match(/color\s*:\s*(#[0-9A-Fa-f]{3,8})/i);
+  if (m4) o.textColor = m4[1];
+  return o;
+}
 
 function jLen(s: string) { return [...(s || '')].length; }
 function extOf(f: File) {
@@ -60,17 +125,51 @@ function parseMarkdown(md: string) {
   for (let raw of chunks) {
     raw = raw.trim(); if (!raw) continue;
     let blk: Omit<Block, 'id'>;
-    if (raw.startsWith('## ')) blk = { type: 'heading', text: raw.slice(3).trim() };
-    else if (/^<div class="callout(?:\s+callout-color-\w+)?">/.test(raw)) {
-      // 색상 추출 (없으면 undefined)
-      const mc = raw.match(/^<div class="callout(?:\s+callout-color-([a-z]+))?">([\s\S]*?)<\/div>\s*$/);
-      const colorRaw = mc?.[1];
-      const inner = mc?.[2] || raw.replace(/^<div class="callout[^"]*">/, '').replace(/<\/div>\s*$/, '');
+    if (raw.startsWith('## ')) {
+      // <h2> 또는 ## — 인라인 style 옵션 지원
+      const mh = raw.match(/^<h2(?:\s+class="[^"]*")?(?:\s+style="([^"]*)")?\s*>([\s\S]*?)<\/h2>$/);
+      if (mh) {
+        blk = { type: 'heading', text: mh[2].replace(/<br\s*\/?>/g, '\n'), ...parseStyleAttr(mh[1] || '') };
+      } else {
+        blk = { type: 'heading', text: raw.slice(3).trim() };
+      }
+    }
+    else if (/^<h2/.test(raw)) {
+      const mh = raw.match(/^<h2(?:\s+class="[^"]*")?(?:\s+style="([^"]*)")?\s*>([\s\S]*?)<\/h2>$/);
+      blk = { type: 'heading', text: mh ? mh[2].replace(/<br\s*\/?>/g, '\n') : raw, ...(mh ? parseStyleAttr(mh[1] || '') : {}) };
+    }
+    else if (/^<hr/i.test(raw)) {
+      // <hr class="line" style="border-color:#xxx" /> 또는 인라인
+      const mhr = raw.match(/^<hr(?:\s+class="[^"]*")?(?:\s+style="([^"]*)")?\s*\/?>$/i);
+      const st = mhr?.[1] || '';
+      const mc = st.match(/border-(?:top-)?color\s*:\s*(#[0-9A-Fa-f]{3,8})/i);
+      const cls = raw.match(/class="line(?:\s+line-color-([a-z]+))?/);
+      blk = { type: 'line', text: '', lineColor: cls?.[1] || mc?.[1] || undefined };
+    }
+    else if (/^<div class="callout/.test(raw)) {
+      // 색상 추출 (테마키 또는 인라인 style 의 hex)
+      const mc = raw.match(/^<div class="callout(?:\s+callout-color-([a-z]+))?"(?:\s+style="([^"]*)")?\s*>([\s\S]*?)<\/div>\s*$/);
+      const colorKey = mc?.[1];
+      const styleAttr = mc?.[2] || '';
+      const inner = mc?.[3] || raw.replace(/^<div class="callout[^"]*"[^>]*>/, '').replace(/<\/div>\s*$/, '');
+      // 카드 배경색: 테마키 우선, 없으면 style 의 background 색
+      let cardColor: string | undefined = undefined;
+      if (isThemeKey(colorKey)) cardColor = colorKey;
+      else {
+        const mb = styleAttr.match(/background(?:-color)?\s*:\s*(#[0-9A-Fa-f]{3,8})/i);
+        if (mb) cardColor = mb[1].slice(0, 7); // alpha 떼고 6자리 hex 만
+      }
       blk = {
         type: 'card',
         text: unesc(inner.replace(/<br\s*\/?>/g, '\n')),
-        color: isThemeKey(colorRaw) ? colorRaw : undefined,
+        color: cardColor,
+        ...parseStyleAttr(styleAttr),
       };
+    }
+    else if (/^<p\s/.test(raw)) {
+      // 스타일 있는 본문 단락 <p style="...">텍스트</p>
+      const mp = raw.match(/^<p(?:\s+style="([^"]*)")?\s*>([\s\S]*?)<\/p>$/);
+      blk = { type: 'text', text: mp ? mp[2].replace(/<br\s*\/?>/g, '\n') : raw, ...(mp ? parseStyleAttr(mp[1] || '') : {}) };
     }
     else if (/^!\[[^\]]*\]\([^)]*\)$/.test(raw)) {
       const mm = raw.match(/^!\[([^\]]*)\]\(([^)]*)\)$/);
@@ -108,18 +207,25 @@ export default function AdminPage() {
   const [posts, setPosts] = useState<PostItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState('');
+  const [mdExpanded, setMdExpanded] = useState(false);
+  const [mdPreview, setMdPreview] = useState('');
 
   const tags = tagsRaw.split(',').map((s) => s.trim()).filter(Boolean);
 
   /* ---- 블록 ---- */
   function addBlock(type: BlockType) {
-    setBlocks((b) => [...b, { id: nextId, type, text: '', ...(type === 'card' ? { color: theme } : {}) }]);
+    setBlocks((b) => [...b, {
+      id: nextId, type, text: '',
+      ...(type === 'card' ? { color: theme } : {}),
+      ...(type === 'line' ? { lineColor: theme } : {}),
+    }]);
     setNextId((n) => n + 1);
   }
   function setText(id: number, v: string) { setBlocks((b) => b.map((x) => (x.id === id ? { ...x, text: v } : x))); }
-  function setBlockColor(id: number, c: ThemeKey) {
-    setBlocks((b) => b.map((x) => (x.id === id ? { ...x, color: c } : x)));
+  function patchBlock(id: number, patch: Partial<Block>) {
+    setBlocks((b) => b.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   }
+  function setBlockColor(id: number, c: string) { patchBlock(id, { color: c }); }
   function setBlockFile(id: number, f?: File) { setBlocks((b) => b.map((x) => (x.id === id ? { ...x, file: f, preview: f ? URL.createObjectURL(f) : x.preview } : x))); }
   function rmBlock(id: number) { setBlocks((b) => b.filter((x) => x.id !== id)); }
   function move(id: number, d: number) {
@@ -179,11 +285,38 @@ export default function AdminPage() {
 
     const parts: string[] = [];
     for (const b of blocks) {
-      if (b.type === 'heading') parts.push(`## ${b.text || ''}`);
-      else if (b.type === 'text') parts.push(b.text || '');
+      const sStr = blockStyleStr(b);
+      if (b.type === 'heading') {
+        if (sStr) parts.push(`<h2 style="${sStr}">${esc(b.text || '').replace(/\n/g, '<br>')}</h2>`);
+        else parts.push(`## ${b.text || ''}`);
+      }
+      else if (b.type === 'text') {
+        if (sStr) parts.push(`<p style="${sStr}">${esc(b.text || '').replace(/\n/g, '<br>')}</p>`);
+        else parts.push(b.text || '');
+      }
       else if (b.type === 'card') {
-        const cls = b.color ? `callout callout-color-${b.color}` : 'callout';
-        parts.push(`<div class="${cls}">${esc(b.text || '').replace(/\n/g, '<br>')}</div>`);
+        // 카드 색상: 테마키면 클래스, hex면 인라인 style (배경/보더)
+        let cls = 'callout';
+        let cardStyle = sStr;
+        if (b.color) {
+          if (isThemeKey(b.color)) cls += ` callout-color-${b.color}`;
+          else if (isHexColor(b.color)) {
+            const bg = resolveCardBg(b.color);
+            const bd = resolveColor(b.color);
+            cardStyle = [`background:${bg}`, `border-left-color:${bd}`, sStr].filter(Boolean).join(';');
+          }
+        }
+        const styleAttr = cardStyle ? ` style="${cardStyle}"` : '';
+        parts.push(`<div class="${cls}"${styleAttr}>${esc(b.text || '').replace(/\n/g, '<br>')}</div>`);
+      }
+      else if (b.type === 'line') {
+        if (b.lineColor && isThemeKey(b.lineColor)) {
+          parts.push(`<hr class="line line-color-${b.lineColor}" />`);
+        } else if (b.lineColor && isHexColor(b.lineColor)) {
+          parts.push(`<hr class="line" style="border-top-color:${b.lineColor}" />`);
+        } else {
+          parts.push(`<hr class="line" />`);
+        }
       }
       else if (b.type === 'quote') parts.push(`> ${(b.text || '').replace(/\n/g, '\n> ')}`);
       else if (b.type === 'image') {
@@ -352,6 +485,7 @@ export default function AdminPage() {
               <button className="adm-btn" onClick={() => addBlock('card')}>＋ 강조 카드</button>
               <button className="adm-btn" onClick={() => addBlock('quote')}>＋ 인용</button>
               <button className="adm-btn" onClick={() => addBlock('image')}>＋ 이미지</button>
+              <button className="adm-btn" onClick={() => addBlock('line')}>＋ 라인</button>
             </div>
             {blocks.length === 0 && <p className="adm-desc">아직 블록이 없어요. 위 버튼으로 추가하세요.</p>}
             {blocks.map((b) => (
@@ -370,16 +504,17 @@ export default function AdminPage() {
                     {b.existingUrl && !b.preview && <div className="adm-cnt" style={{ textAlign: 'left' }}>현재: {b.existingUrl}</div>}
                     <input className="adm-in" style={{ marginTop: 7 }} value={b.text} onChange={(e) => setText(b.id, e.target.value)} placeholder="이미지 설명(alt) — 검색에 도움" />
                   </>
+                ) : b.type === 'line' ? (
+                  <div>
+                    <div className="adm-lab" style={{ margin: '0 0 4px' }}>🎨 라인 색상 <span>구분선 색</span></div>
+                    <ColorPicker value={b.lineColor || theme} onChange={(c) => patchBlock(b.id, { lineColor: c })} />
+                  </div>
                 ) : (
                   <>
                     <textarea className="adm-in" value={b.text} rows={b.type === 'text' ? 3 : 2} onChange={(e) => setText(b.id, e.target.value)} placeholder={`${TYPE_NAME[b.type]} 내용…`} />
-                    {b.type === 'card' && (
-                      <div style={{ marginTop: 8 }}>
-                        <div className="adm-lab" style={{ margin: '4px 0 4px' }}>
-                          🎨 강조 카드 색상 <span>이 카드만 적용</span>
-                        </div>
-                        <ColorSwatches value={b.color || theme} onChange={(c) => setBlockColor(b.id, c)} mini />
-                      </div>
+                    {/* 스타일 패널 — 소제목/본문/강조카드 */}
+                    {(b.type === 'heading' || b.type === 'text' || b.type === 'card') && (
+                      <BlockStyleEditor block={b} theme={theme} onPatch={(p) => patchBlock(b.id, p)} />
                     )}
                   </>
                 )}
@@ -398,15 +533,40 @@ export default function AdminPage() {
               <div className="post-body">
                 {blocks.length === 0 && <p style={{ color: '#aaa' }}>본문 블록을 추가해보세요.</p>}
                 {blocks.map((b) => {
-                  if (b.type === 'heading') return <h2 key={b.id}>{b.text || '소제목'}</h2>;
-                  if (b.type === 'text') return <p key={b.id}>{b.text || '본문…'}</p>;
-                  if (b.type === 'card') return <div className={`callout callout-color-${b.color || theme}`} key={b.id}>{b.text || '강조 내용'}</div>;
+                  const st = blockStyle(b);
+                  if (b.type === 'heading') return <h2 key={b.id} style={st}>{b.text || '소제목'}</h2>;
+                  if (b.type === 'text') return <p key={b.id} style={st}>{b.text || '본문…'}</p>;
+                  if (b.type === 'card') {
+                    const c = b.color || theme;
+                    if (isThemeKey(c)) return <div className={`callout callout-color-${c}`} key={b.id} style={st}>{b.text || '강조 내용'}</div>;
+                    // 커스텀 hex
+                    const bg = resolveCardBg(c); const bd = resolveColor(c);
+                    return <div className="callout" key={b.id} style={{ ...st, background: bg, borderLeftColor: bd }}>{b.text || '강조 내용'}</div>;
+                  }
                   if (b.type === 'quote') return <blockquote key={b.id}>{b.text || '인용'}</blockquote>;
+                  if (b.type === 'line') {
+                    const lc = resolveColor(b.lineColor || theme, '#b0a99a');
+                    return <hr key={b.id} style={{ border: 'none', borderTop: `2px solid ${lc}`, margin: '20px 0' }} />;
+                  }
                   if (b.type === 'image') { const src = b.preview || b.existingUrl; return src ? <img key={b.id} src={src} alt={b.text} /> : <div key={b.id} style={{ background: '#eee', borderRadius: 8, padding: 30, textAlign: 'center', color: '#aaa' }}>이미지 자리</div>; }
                   return null;
                 })}
               </div>
             </div>
+          </div>
+
+          <div className="adm-panel">
+            <h2 className="adm-h">📄 저장될 마크다운 <span className="adm-auto" style={{ background: '#1E1B2E', color: '#D7CFF0' }}>코드 보기</span></h2>
+            <p className="adm-desc">SEO 부분(맨 위 frontmatter)은 자동으로 채워져요. 클릭으로 펼치기.</p>
+            <MdViewer
+              expanded={mdExpanded}
+              onToggle={() => setMdExpanded((v) => !v)}
+              fetchMd={async () => {
+                try { const r = await buildPost(); setMdPreview(r.markdown); return r.markdown; }
+                catch { return mdPreview; }
+              }}
+              md={mdPreview}
+            />
           </div>
 
           <div className="adm-panel">
@@ -433,7 +593,7 @@ function Counter({ v, min, max }: { v: string; min: number; max: number }) {
   return <div className="adm-cnt" style={{ color: col }}>{n}자 {msg}</div>;
 }
 
-/* 색상 칩 스워치 — 메인앱 10개 테마 중 선택 */
+/* 색상 칩 스워치 — 테마 키만 (글 전체 테마 색상 등) */
 function ColorSwatches({ value, onChange, mini }: { value: ThemeKey; onChange: (k: ThemeKey) => void; mini?: boolean }) {
   const sz = mini ? 22 : 28;
   return (
@@ -459,6 +619,189 @@ function ColorSwatches({ value, onChange, mini }: { value: ThemeKey; onChange: (
           />
         );
       })}
+    </div>
+  );
+}
+
+/* 색상 피커 — 테마 키 OR 커스텀 hex */
+function ColorPicker({ value, onChange }: { value?: string; onChange: (v: string) => void }) {
+  const isTheme = !!value && isThemeKey(value);
+  const customHex = !value || isTheme ? '#888888' : value;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, alignItems: 'center' }}>
+      {THEME_KEYS.map((k) => {
+        const th = THEMES[k];
+        const on = value === k;
+        return (
+          <button
+            key={k}
+            type="button"
+            title={th.name}
+            onClick={() => onChange(k)}
+            aria-label={th.name}
+            style={{
+              width: 22, height: 22, borderRadius: '50%',
+              background: th.color,
+              border: on ? '2.5px solid #1c1c1c' : '2px solid #fff',
+              outline: on ? '1.5px solid #fff' : 'none',
+              boxShadow: on ? '0 0 0 2px ' + th.color : '0 1px 3px rgba(0,0,0,.12)',
+              cursor: 'pointer', padding: 0, transition: '.12s',
+            }}
+          />
+        );
+      })}
+      <span style={{ width: 1, height: 18, background: '#ddd', margin: '0 4px' }} />
+      <label
+        title="커스텀 색 — 색상 박스 클릭"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '2px 6px', border: !isTheme && value ? '2px solid #1c1c1c' : '1.5px dashed #c4bdaf',
+          borderRadius: 16, cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#1c1c1c',
+        }}
+      >
+        🎨
+        <input
+          type="color"
+          value={customHex}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ width: 22, height: 22, border: 'none', padding: 0, background: 'transparent', cursor: 'pointer' }}
+        />
+        {!isTheme && value && <span style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 10 }}>{value}</span>}
+      </label>
+    </div>
+  );
+}
+
+/* 폰트 / 사이즈 / 굵기 / 색상 — 한 블록의 모든 스타일 옵션 */
+function BlockStyleEditor({ block, theme, onPatch }: { block: Block; theme: ThemeKey; onPatch: (p: Partial<Block>) => void }) {
+  const [open, setOpen] = useState(false);
+  const has =
+    !!block.font || !!block.size || !!block.weight || !!block.textColor ||
+    (block.type === 'card' && !!block.color);
+  return (
+    <div style={{ marginTop: 8, borderTop: '1px dashed #e5e2d8', paddingTop: 6 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 11, fontWeight: 700, color: has ? 'var(--accent)' : 'var(--text-3)',
+          padding: '3px 0',
+        }}
+      >
+        🎨 스타일 옵션 {open ? '▲' : '▼'} {has && '· 적용됨'}
+      </button>
+      {open && (
+        <div style={{ paddingTop: 4 }}>
+          {/* 폰트 종류 */}
+          <div className="adm-lab" style={{ margin: '6px 0 3px' }}>폰트 종류</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['sans', 'serif'] as FontKind[]).map((f) => (
+              <button key={f} type="button"
+                onClick={() => onPatch({ font: block.font === f ? undefined : f })}
+                className={`adm-btn mini ${block.font === f ? 'primary' : ''}`}
+                style={{ fontFamily: FONT_FAMILY[f], minWidth: 80 }}>
+                {f === 'sans' ? '고딕 (Gothic)' : '명조 (Mincho)'}
+              </button>
+            ))}
+          </div>
+
+          {/* 사이즈 */}
+          <div className="adm-lab" style={{ margin: '8px 0 3px' }}>폰트 사이즈 (px)</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {SIZES.map((s) => (
+              <button key={s} type="button"
+                onClick={() => onPatch({ size: block.size === s ? undefined : s })}
+                className={`adm-btn mini ${block.size === s ? 'primary' : ''}`}>
+                {s}
+              </button>
+            ))}
+          </div>
+
+          {/* 굵기 */}
+          <div className="adm-lab" style={{ margin: '8px 0 3px' }}>굵기</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {(Object.keys(WEIGHT_LABEL) as WeightKind[]).map((w) => (
+              <button key={w} type="button"
+                onClick={() => onPatch({ weight: block.weight === w ? undefined : w })}
+                className={`adm-btn mini ${block.weight === w ? 'primary' : ''}`}
+                style={{ fontWeight: WEIGHT_VAL[w] }}>
+                {WEIGHT_LABEL[w]}
+              </button>
+            ))}
+          </div>
+
+          {/* 글자 색 */}
+          <div className="adm-lab" style={{ margin: '8px 0 3px' }}>글자 색</div>
+          <ColorPicker value={block.textColor} onChange={(c) => onPatch({ textColor: c })} />
+
+          {/* 카드 전용 — 배경/보더 색 */}
+          {block.type === 'card' && (
+            <>
+              <div className="adm-lab" style={{ margin: '8px 0 3px' }}>강조 카드 색 (배경+좌측 보더)</div>
+              <ColorPicker value={block.color || theme} onChange={(c) => onPatch({ color: c })} />
+            </>
+          )}
+
+          {/* 초기화 */}
+          {has && (
+            <button type="button"
+              onClick={() => onPatch({ font: undefined, size: undefined, weight: undefined, textColor: undefined, ...(block.type === 'card' ? { color: undefined } : {}) })}
+              className="adm-btn mini" style={{ marginTop: 10 }}>
+              스타일 초기화
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* 마크다운 출력 박스 — 일부만 보이고 펼치기 */
+function MdViewer({ md, expanded, onToggle, fetchMd }: {
+  md: string; expanded: boolean; onToggle: () => void;
+  fetchMd: () => Promise<string>;
+}) {
+  const [shown, setShown] = useState(md);
+  // 패널 열릴 때 미리보기 fetch (사용자 클릭 시점)
+  function handleToggle() {
+    if (!expanded) {
+      fetchMd().then((s) => setShown(s));
+    }
+    onToggle();
+  }
+  const fence = expanded ? 'none' : '220px';
+  return (
+    <div style={{ position: 'relative' }}>
+      <pre
+        style={{
+          background: '#1E1B2E', color: '#D7CFF0',
+          padding: 14, borderRadius: 10,
+          fontSize: 12, lineHeight: 1.55,
+          fontFamily: 'ui-monospace,Menlo,Consolas,monospace',
+          margin: 0, maxHeight: fence, overflow: expanded ? 'auto' : 'hidden',
+          whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+        }}
+      >
+        {shown || '(아직 비어 있어요 — 본문을 좀 작성한 뒤 펼쳐보세요)'}
+      </pre>
+      {!expanded && shown && (
+        <div
+          style={{
+            position: 'absolute', left: 0, right: 0, bottom: 0, height: 60,
+            background: 'linear-gradient(to bottom, rgba(30,27,46,0), rgba(30,27,46,1))',
+            pointerEvents: 'none', borderBottomLeftRadius: 10, borderBottomRightRadius: 10,
+          }}
+        />
+      )}
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="adm-btn"
+        style={{ marginTop: 8, width: '100%' }}
+      >
+        {expanded ? '▲ 접기' : (shown ? '▼ 전체 펼치기' : '▼ 코드 보기')}
+      </button>
     </div>
   );
 }

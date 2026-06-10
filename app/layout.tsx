@@ -94,6 +94,18 @@ img { max-width: 100%; height: auto; display: block; border-radius: 8px; }
 .post-body .callout.callout-color-cyan    { background: #E5ECF0; border-left-color: #266586; }
 .post-body .callout.callout-color-lime    { background: #E7F9E7; border-left-color: #38CF39; }
 .post-body .callout.callout-color-magenta { background: #FCE1F0; border-left-color: #E30884; }
+/* 구분 라인 — 색상 미지정 시 기본 베이지, 테마키 또는 인라인 style 로 색상 지정 가능 */
+.post-body hr.line { border: none; border-top: 2px solid #b0a99a; margin: 24px 0; }
+.post-body hr.line.line-color-green   { border-top-color: #00644D; }
+.post-body hr.line.line-color-blue    { border-top-color: #0279F7; }
+.post-body hr.line.line-color-purple  { border-top-color: #380193; }
+.post-body hr.line.line-color-coral   { border-top-color: #F78156; }
+.post-body hr.line.line-color-rose    { border-top-color: #F198D5; }
+.post-body hr.line.line-color-gold    { border-top-color: #FFDE02; }
+.post-body hr.line.line-color-indigo  { border-top-color: #172C58; }
+.post-body hr.line.line-color-cyan    { border-top-color: #266586; }
+.post-body hr.line.line-color-lime    { border-top-color: #38CF39; }
+.post-body hr.line.line-color-magenta { border-top-color: #E30884; }
 .post-body table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
 .post-body th, .post-body td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
 .post-body th { background: var(--tag-bg); font-weight: 700; }

@@ -42,3 +42,27 @@ export function isThemeKey(s: unknown): s is ThemeKey {
 export function getTheme(k: unknown): Theme {
   return isThemeKey(k) ? THEMES[k] : THEMES[DEFAULT_THEME];
 }
+
+/* ────────────────────────────────────────────────────────────
+   색상 헬퍼 — 값은 테마 키(10개) OR 임의 hex(#RRGGBB)
+   ──────────────────────────────────────────────────────────── */
+
+/** "green" | "#FF0011" → 실제 hex 색상 */
+export function resolveColor(v: string | undefined | null, fallback = ''): string {
+  if (!v) return fallback;
+  if (isThemeKey(v)) return THEMES[v].color;
+  if (/^#[0-9A-Fa-f]{3,8}$/.test(v)) return v;
+  return fallback;
+}
+
+/** 강조 카드용 배경색 (light) */
+export function resolveCardBg(v: string | undefined | null, fallback = '#f5f1ea'): string {
+  if (!v) return fallback;
+  if (isThemeKey(v)) return THEMES[v].light;
+  if (/^#[0-9A-Fa-f]{6}$/.test(v)) return v + '20'; // 커스텀: 12% alpha
+  return fallback;
+}
+
+export function isHexColor(v: string): boolean {
+  return /^#[0-9A-Fa-f]{3,8}$/.test(v);
+}
