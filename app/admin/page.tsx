@@ -518,9 +518,9 @@ export default function AdminPage() {
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <a className="adm-btn mini" href={`/posts/${p.slug}`} target="_blank" rel="noopener">보기</a>
                   <button className="adm-btn mini" onClick={() => editPost(p.slug)}>수정</button>
-                  <button className="adm-btn mini" title="X 에 게시" onClick={() => shareToSns(p.slug, ['x'])}>🐦</button>
-                  <button className="adm-btn mini" title="Threads 에 게시" onClick={() => shareToSns(p.slug, ['threads'])}>🧵</button>
-                  <button className="adm-btn mini" title="X + Threads 동시 게시" onClick={() => shareToSns(p.slug, ['x', 'threads'])}>📤</button>
+                  <button className="adm-btn mini" title="X 에 게시" onClick={() => shareToSns(p.slug, ['x'])}>X</button>
+                  <button className="adm-btn mini" title="Threads 에 게시" onClick={() => shareToSns(p.slug, ['threads'])}>Threads</button>
+                  <button className="adm-btn mini" title="X + Threads 동시 게시" onClick={() => shareToSns(p.slug, ['x', 'threads'])}>X + Threads</button>
                   <button className="adm-btn mini danger" onClick={() => delPost(p.slug)}>삭제</button>
                 </div>
               </div>
