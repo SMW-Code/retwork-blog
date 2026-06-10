@@ -262,6 +262,7 @@ export default function AdminPage() {
     setHero(undefined); setHeroPreview(''); setHeroExistingUrl(''); setBlocks([]); setNextId(1);
     setTheme(DEFAULT_THEME);
     setStatus('idle'); setMessage(''); setMode('edit');
+    setSnsX(true); setSnsXResult(null);   // 새 글: X 자동 게시 기본 ON
   }
   async function loadList() {
     setMode('list'); setListLoading(true); setListError('');
@@ -287,6 +288,7 @@ export default function AdminPage() {
       setBlocks(p.blocks); setNextId(p.nextId);
       setTheme(isThemeKey(p.fm.theme) ? p.fm.theme : DEFAULT_THEME);
       setStatus('idle'); setMessage(''); setMode('edit');
+      setSnsX(false); setSnsXResult(null);   // 수정 모드: X 자동 게시 기본 OFF (중복 트윗 차단 회피)
     } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
   }
   async function delPost(s: string) {
@@ -575,6 +577,12 @@ export default function AdminPage() {
           <div className="adm-panel">
             <h2 className="adm-h">③ SNS 자동 공유 <span className="adm-auto">옵션</span></h2>
             <p className="adm-desc">발행과 동시에 SNS 에도 자동 게시. 비워두면 자동 메시지 생성.</p>
+            {editingSlug && (
+              <div style={{ background: '#FFF6E6', border: '1px solid #F3D9A0', color: '#8a6020', padding: '8px 10px', borderRadius: 8, fontSize: 12, marginBottom: 10 }}>
+                ℹ️ 수정 모드 — 같은 내용으로 다시 X 에 게시하면 <b>중복 차단(403)</b> 됩니다. <br />
+                새 트윗을 올리려면 「메시지 직접 작성하기」로 본문을 다르게 적어주세요.
+              </div>
+            )}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 9, background: snsX ? '#E6F5EF' : '#fff' }}>
               <input type="checkbox" checked={snsX} onChange={(e) => setSnsX(e.target.checked)} />
               <span>🐦 <b>X (트위터)</b> 에 자동 게시</span>
