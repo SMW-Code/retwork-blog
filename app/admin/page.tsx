@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import {
   THEMES, THEME_KEYS, DEFAULT_THEME, isThemeKey,
@@ -251,6 +251,8 @@ export default function AdminPage() {
   const [snsThreadsCustom, setSnsThreadsCustom] = useState('');
   const [snsThreadsEditOpen, setSnsThreadsEditOpen] = useState(false);
   const [snsThreadsResult, setSnsThreadsResult] = useState<{ ok: boolean; threadUrl?: string | null; error?: string; text?: string } | null>(null);
+  // 이미지 편집 (회전/자르기) — null = 닫힘, 'hero' = 대표 이미지, 숫자 = 블록 id
+  const [editingImg, setEditingImg] = useState<number | 'hero' | null>(null);
 
   const tags = tagsRaw.split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -539,9 +541,31 @@ export default function AdminPage() {
     '--accent': themeObj.color,
     '--accent-dark': themeObj.dark,
   } as CSSProperties;
+  // 편집 중인 이미지의 File 객체와 적용 콜백
+  const editingFile: File | null = editingImg === 'hero'
+    ? hero || null
+    : typeof editingImg === 'number'
+      ? blocks.find((b) => b.id === editingImg)?.file || null
+      : null;
+  function applyEditedFile(newFile: File) {
+    if (editingImg === 'hero') {
+      pickHero(newFile);
+    } else if (typeof editingImg === 'number') {
+      setBlockFile(editingImg, newFile);
+    }
+    setEditingImg(null);
+  }
+
   return (
     <div className="adm-root" style={rootStyle}>
       <Style />{TopBar}
+      {editingFile && (
+        <ImageEditor
+          file={editingFile}
+          onApply={applyEditedFile}
+          onCancel={() => setEditingImg(null)}
+        />
+      )}
       {editingSlug && <div className="adm-banner edit">✏️ 기존 글 수정 중: <b>{editingSlug}</b> (발행하면 덮어써져요)</div>}
       {status === 'done' && <div className="adm-banner ok">✅ 발행됐어요! 약 1분 후 반영 → <a href={resultUrl} target="_blank" rel="noopener">{resultUrl}</a></div>}
       {snsXResult && snsXResult.ok && (
@@ -585,6 +609,11 @@ export default function AdminPage() {
 
             <label className="adm-lab">대표 이미지 <span>SNS 미리보기 이미지</span></label>
             <input type="file" accept="image/*" onChange={(e) => pickHero(e.target.files?.[0])} />
+            {hero && (
+              <button type="button" className="adm-btn mini" style={{ marginTop: 6 }} onClick={() => setEditingImg('hero')}>
+                ✂️ 회전·자르기
+              </button>
+            )}
             {heroExistingUrl && !heroPreview && <div className="adm-cnt" style={{ textAlign: 'left' }}>현재: {heroExistingUrl} (바꾸려면 새 파일 선택)</div>}
 
             <label className="adm-lab">🎨 글 테마 색상 <span>제목 보더·링크·CTA 버튼 등에 적용</span></label>
@@ -617,6 +646,16 @@ export default function AdminPage() {
                 {b.type === 'image' ? (
                   <>
                     <input type="file" accept="image/*" onChange={(e) => setBlockFile(b.id, e.target.files?.[0])} />
+                    {b.file && (
+                      <button type="button" className="adm-btn mini" style={{ marginTop: 6 }} onClick={() => setEditingImg(b.id)}>
+                        ✂️ 회전·자르기
+                      </button>
+                    )}
+                    {b.preview && (
+                      <div style={{ marginTop: 6 }}>
+                        <img src={b.preview} alt="" style={{ maxHeight: 120, borderRadius: 6 }} />
+                      </div>
+                    )}
                     {b.existingUrl && !b.preview && <div className="adm-cnt" style={{ textAlign: 'left' }}>현재: {b.existingUrl}</div>}
                     <input className="adm-in" style={{ marginTop: 7 }} value={b.text} onChange={(e) => setText(b.id, e.target.value)} placeholder="이미지 설명(alt) — 검색에 도움" />
                   </>
@@ -947,6 +986,149 @@ function BlockStyleEditor({ block, theme, onPatch }: { block: Block; theme: Them
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────
+   이미지 편집기 — 회전 (90° 단위) + 비율 자르기 (사전 정의)
+   ───────────────────────────────────────────────── */
+const CROP_RATIOS = [
+  { key: 'free',  label: '원본', value: null },
+  { key: '1:1',   label: '1:1 정사각', value: 1 },
+  { key: '4:3',   label: '4:3', value: 4 / 3 },
+  { key: '16:9',  label: '16:9', value: 16 / 9 },
+  { key: '3:2',   label: '3:2', value: 3 / 2 },
+  { key: '3:4',   label: '3:4 세로', value: 3 / 4 },
+  { key: '9:16',  label: '9:16 세로', value: 9 / 16 },
+] as const;
+
+function ImageEditor({ file, onApply, onCancel }: {
+  file: File;
+  onApply: (newFile: File) => void;
+  onCancel: () => void;
+}) {
+  const [angle, setAngle] = useState(0);         // 0/90/180/270
+  const [ratio, setRatio] = useState<number | null>(null);
+  const [imgEl, setImgEl] = useState<HTMLImageElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // 파일 → Image 로드
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    const img = new window.Image();
+    img.onload = () => setImgEl(img);
+    img.onerror = () => setImgEl(null);
+    img.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  // 회전·자르기 적용된 Canvas 렌더
+  useEffect(() => {
+    if (!imgEl || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rotated = angle === 90 || angle === 270;
+    const baseW = rotated ? imgEl.height : imgEl.width;
+    const baseH = rotated ? imgEl.width : imgEl.height;
+
+    // 자르기 영역 (중앙)
+    let cropW = baseW, cropH = baseH;
+    if (ratio) {
+      const imgRatio = baseW / baseH;
+      if (imgRatio > ratio) { cropW = baseH * ratio; cropH = baseH; }
+      else { cropW = baseW; cropH = baseW / ratio; }
+    }
+    canvas.width = Math.round(cropW);
+    canvas.height = Math.round(cropH);
+
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((angle * Math.PI) / 180);
+    ctx.drawImage(imgEl, -imgEl.width / 2, -imgEl.height / 2);
+    ctx.restore();
+  }, [imgEl, angle, ratio]);
+
+  function apply() {
+    if (!canvasRef.current) return;
+    canvasRef.current.toBlob((blob) => {
+      if (!blob) return;
+      const name = file.name.replace(/\.\w+$/, '') + '.jpg';
+      const newFile = new File([blob], name, { type: 'image/jpeg' });
+      onApply(newFile);
+    }, 'image/jpeg', 0.9);
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 99999,
+      background: 'rgba(0,0,0,0.85)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }} onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div style={{
+        background: '#fff', borderRadius: 14, padding: 18,
+        maxWidth: '95vw', width: 720,
+        display: 'flex', flexDirection: 'column', gap: 12,
+        maxHeight: '95vh',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>✂️ 이미지 편집</h3>
+          <span style={{ fontSize: 11, color: 'var(--text-3)' }}>회전 / 비율 자르기 → 적용</span>
+          <button onClick={onCancel} className="adm-btn mini" style={{ marginLeft: 'auto' }}>닫기</button>
+        </div>
+
+        {/* 캔버스 미리보기 */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px',
+          borderRadius: 8, padding: 12, minHeight: 200, overflow: 'auto',
+        }}>
+          <canvas ref={canvasRef} style={{
+            maxWidth: '100%', maxHeight: '50vh',
+            boxShadow: '0 2px 10px rgba(0,0,0,.15)', borderRadius: 4,
+          }} />
+        </div>
+
+        {/* 회전 */}
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 5 }}>
+            회전 <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>· 현재 {angle}°</span>
+          </div>
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <button className="adm-btn mini" onClick={() => setAngle((a) => (a + 270) % 360)}>↺ 좌 90°</button>
+            <button className="adm-btn mini" onClick={() => setAngle((a) => (a + 90) % 360)}>↻ 우 90°</button>
+            <button className="adm-btn mini" onClick={() => setAngle((a) => (a + 180) % 360)}>↕ 180°</button>
+            <button className="adm-btn mini" onClick={() => setAngle(0)}>초기화</button>
+          </div>
+        </div>
+
+        {/* 비율 자르기 */}
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 5 }}>
+            비율 자르기 <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>· 중앙 자동 자르기</span>
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {CROP_RATIOS.map((r) => (
+              <button key={r.key}
+                className={`adm-btn mini ${ratio === r.value ? 'primary' : ''}`}
+                onClick={() => setRatio(r.value)}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 액션 */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <button onClick={onCancel} className="adm-btn">취소</button>
+          <button onClick={apply} className="adm-btn primary">✅ 적용</button>
+        </div>
+      </div>
     </div>
   );
 }
