@@ -312,6 +312,35 @@ export default function AdminPage() {
       setSnsThreads(false); setSnsThreadsResult(null);
     } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
   }
+  /* 기존 글 SNS 재공유 — /api/sns/share-by-slug 호출 */
+  async function shareToSns(s: string, platforms: ('x' | 'threads')[]) {
+    const label = platforms.join(' + ');
+    if (!window.confirm(`'${s}' 글을 ${label} 에 게시할까요?\n같은 내용 중복 시 X 는 403 거부될 수 있어요.`)) return;
+    try {
+      const res = await fetch('/api/sns/share-by-slug', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, slug: s, platforms }),
+      });
+      const data = await res.json();
+      const msgs: string[] = [];
+      if (data.results?.x) {
+        msgs.push(data.results.x.ok
+          ? `🐦 X 게시 OK → ${data.results.x.tweetUrl}`
+          : `🐦 X 실패: ${data.results.x.error}`);
+      }
+      if (data.results?.threads) {
+        msgs.push(data.results.threads.ok
+          ? `🧵 Threads 게시 OK${data.results.threads.threadUrl ? ' → ' + data.results.threads.threadUrl : ''}`
+          : `🧵 Threads 실패: ${data.results.threads.error}`);
+      }
+      if (!msgs.length) msgs.push(data.error || '응답 없음');
+      window.alert((data.ok ? '✅ ' : '⚠️ ') + msgs.join('\n'));
+    } catch (e) {
+      window.alert('❌ 요청 실패: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  }
+
   async function delPost(s: string) {
     if (!window.confirm(`'${s}' 글을 삭제할까요?\n되돌릴 수 없어요. (이미지도 같이 삭제)`)) return;
     try {
@@ -486,9 +515,12 @@ export default function AdminPage() {
                   <div className="adm-lt">{p.title}</div>
                   <div className="adm-ls">{p.date} · /posts/{p.slug}</div>
                 </div>
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexShrink: 0 }}>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                   <a className="adm-btn mini" href={`/posts/${p.slug}`} target="_blank" rel="noopener">보기</a>
                   <button className="adm-btn mini" onClick={() => editPost(p.slug)}>수정</button>
+                  <button className="adm-btn mini" title="X 에 게시" onClick={() => shareToSns(p.slug, ['x'])}>🐦</button>
+                  <button className="adm-btn mini" title="Threads 에 게시" onClick={() => shareToSns(p.slug, ['threads'])}>🧵</button>
+                  <button className="adm-btn mini" title="X + Threads 동시 게시" onClick={() => shareToSns(p.slug, ['x', 'threads'])}>📤</button>
                   <button className="adm-btn mini danger" onClick={() => delPost(p.slug)}>삭제</button>
                 </div>
               </div>
