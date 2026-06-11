@@ -57,7 +57,8 @@ img { max-width: 100%; height: auto; display: block; border-radius: 8px; }
 .container { max-width: var(--max-w); margin: 0 auto; padding: 28px 20px 80px; }
 .site-header { border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 10; }
 .site-header-inner { max-width: var(--max-w); margin: 0 auto; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; }
-.site-logo { font-family: var(--font-jp); font-size: 18px; font-weight: 800; color: var(--text-1); letter-spacing: -.3px; }
+.site-logo { display: flex; align-items: center; gap: 8px; font-family: var(--font-jp); font-size: 18px; font-weight: 800; color: var(--text-1); letter-spacing: -.3px; }
+.site-logo img { width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0; }
 .site-logo span { color: var(--accent); }
 .site-nav a { font-size: 13px; color: var(--text-2); margin-left: 16px; }
 .post-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 14px; transition: border-color .15s, transform .15s; }
@@ -141,6 +142,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="site-header">
           <div className="site-header-inner">
             <Link href="/" className="site-logo">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/images/logo.png" alt="RetWork" />
               RetWork<span>.blog</span>
             </Link>
             <nav className="site-nav">
