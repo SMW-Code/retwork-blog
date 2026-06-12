@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getAllSlugs, getPostBySlug } from '../../../lib/posts';
+import { getAllSlugs, getPostBySlug, getAllPosts } from '../../../lib/posts';
 import { getTheme } from '../../../lib/themes';
 import AdSlot from '../../../components/AdSlot';
 import type { Metadata } from 'next';
@@ -46,6 +46,8 @@ export default async function PostPage(
   const post = await getPostBySlug(slug);
   if (!post) notFound();
 
+  const SITE = 'https://blog.retwork.jp';
+
   // 글 frontmatter 의 theme 키 → --accent / --accent-dark 를 그 색으로 변경
   const theme = getTheme(post.theme);
   const themeStyle = {
@@ -53,8 +55,34 @@ export default async function PostPage(
     '--accent-dark': theme.dark,
   } as CSSProperties;
 
+  // 관련 글(다른 글) — 현재 글 제외 최신 4개. 글↔글 내부 링크 그래프 강화 → 크롤 유도
+  const related = getAllPosts().filter((p) => p.slug !== slug).slice(0, 4);
+
+  // BlogPosting 구조화 데이터 — Google 이 기사로 인식하도록(색인 우선순위/리치결과 도움)
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: post.title,
+    description: post.description || post.title,
+    image: post.image ? `${SITE}${post.image}` : `${SITE}/images/logo.png`,
+    datePublished: post.date,
+    dateModified: post.date,
+    author: { '@type': 'Organization', name: post.author || 'RetWork編集部', url: SITE },
+    publisher: {
+      '@type': 'Organization',
+      name: 'RetWork',
+      logo: { '@type': 'ImageObject', url: `${SITE}/images/logo.png` },
+    },
+    mainEntityOfPage: { '@type': 'WebPage', '@id': `${SITE}/posts/${slug}` },
+    keywords: (post.tags || []).join(', '),
+  };
+
   return (
     <article style={themeStyle}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <Link href="/" style={{ fontSize: 13, color: 'var(--text-3)' }}>← 記事一覧に戻る</Link>
 
       <h1 className="post-hero">{post.title}</h1>
@@ -114,6 +142,22 @@ export default async function PostPage(
           アプリを開く →
         </a>
       </div>
+
+      {related.length > 0 && (
+        <nav style={{ marginTop: 40 }} aria-label="他の記事">
+          <h2 style={{ fontFamily: 'var(--font-jp)', fontSize: 18, fontWeight: 700, margin: '0 0 14px' }}>
+            他の記事も読む
+          </h2>
+          {related.map((p) => (
+            <Link key={p.slug} href={`/posts/${p.slug}`} style={{ display: 'block', color: 'inherit' }}>
+              <article className="post-card">
+                <h3 style={{ fontFamily: 'var(--font-jp)', fontSize: 16, fontWeight: 700, margin: '0 0 4px', lineHeight: 1.4, color: 'var(--text-1)' }}>{p.title}</h3>
+                <div className="meta">{p.date}{p.author && <> · {p.author}</>}</div>
+              </article>
+            </Link>
+          ))}
+        </nav>
+      )}
 
       <div style={{ marginTop: 32, textAlign: 'center' }}>
         <Link href="/" style={{ fontSize: 13, color: 'var(--text-3)' }}>← 記事一覧に戻る</Link>
