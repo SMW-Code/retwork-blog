@@ -148,6 +148,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <nav className="site-nav">
               <Link href="/">記事一覧</Link>
+              <a href="https://retwork.jp/blog/" target="_blank" rel="noopener">節約ブログ</a>
               <a href="https://retwork.jp" target="_blank" rel="noopener">アプリ</a>
             </nav>
           </div>
@@ -161,6 +162,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/about">運営者</Link>
             <Link href="/privacy">プライバシーポリシー</Link>
             <Link href="/terms">利用規約</Link>
+            <a href="https://retwork.jp/blog/" target="_blank" rel="noopener">節約ブログ</a>
             <a href="https://retwork.jp" target="_blank" rel="noopener">RetWork アプリ</a>
           </div>
         </footer>
