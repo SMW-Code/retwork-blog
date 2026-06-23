@@ -27,18 +27,24 @@ export default function HomePage() {
         {posts.map((p) => (
           <Link key={p.slug} href={`/posts/${p.slug}`} style={{ display: 'block', color: 'inherit' }}>
             <article className="post-card">
-              <h2>{p.title}</h2>
-              <div className="meta">
-                {p.date} {p.author && <>· {p.author}</>}
-              </div>
-              {p.description && <p className="excerpt">{p.description}</p>}
-              {p.tags && p.tags.length > 0 && (
-                <div className="tags">
-                  {p.tags.map((t) => (
-                    <span key={t} className="tag">#{t}</span>
-                  ))}
-                </div>
+              {p.image && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="post-thumb" src={p.image} alt="" loading="lazy" />
               )}
+              <div className="post-body">
+                <h2>{p.title}</h2>
+                <div className="meta">
+                  {p.date} {p.author && <>· {p.author}</>}
+                </div>
+                {p.description && <p className="excerpt">{p.description}</p>}
+                {p.tags && p.tags.length > 0 && (
+                  <div className="tags">
+                    {p.tags.map((t) => (
+                      <span key={t} className="tag">#{t}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </article>
           </Link>
         ))}
