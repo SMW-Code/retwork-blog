@@ -59,7 +59,7 @@ export default async function PostPage(
   const related = getAllPosts().filter((p) => p.slug !== slug).slice(0, 4);
 
   // BlogPosting 구조화 데이터 — Google 이 기사로 인식하도록(색인 우선순위/리치결과 도움)
-  const jsonLd = {
+  const jsonLd: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'BlogPosting',
     headline: post.title,
@@ -76,6 +76,22 @@ export default async function PostPage(
     mainEntityOfPage: { '@type': 'WebPage', '@id': `${SITE}/posts/${slug}` },
     keywords: (post.tags || []).join(', '),
   };
+
+  // 실방문 리뷰 — frontmatter place(좌표/주소) 있으면 음식점 위치를 구조화 데이터로
+  //   (이미지 EXIF GPS 대신 Google 이 신뢰하는 방식. 지역 SEO·실장소 신호)
+  if (post.place && post.place.name) {
+    jsonLd.contentLocation = {
+      '@type': 'Restaurant',
+      name: post.place.name,
+      ...(post.place.address
+        ? { address: { '@type': 'PostalAddress', streetAddress: post.place.address, addressCountry: 'JP' } }
+        : {}),
+      ...(post.place.lat != null && post.place.lng != null
+        ? { geo: { '@type': 'GeoCoordinates', latitude: post.place.lat, longitude: post.place.lng } }
+        : {}),
+      ...(post.place.cuisine ? { servesCuisine: post.place.cuisine } : {}),
+    };
+  }
 
   return (
     <article style={themeStyle}>

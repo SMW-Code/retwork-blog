@@ -9,6 +9,14 @@ const POSTS_DIR = path.join(process.cwd(), 'posts');
 
 import { isThemeKey, type ThemeKey, DEFAULT_THEME } from './themes';
 
+export type PlaceMeta = {
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  cuisine?: string;
+};
+
 export type PostMeta = {
   slug: string;
   title: string;
@@ -18,6 +26,7 @@ export type PostMeta = {
   tags?: string[];
   author?: string;
   theme?: ThemeKey;       // 글 전체 테마색 (--accent). 미지정 시 기본
+  place?: PlaceMeta;      // 실방문 리뷰용 — 음식점 좌표/주소(JSON-LD contentLocation)
 };
 
 export type Post = PostMeta & { contentHtml: string };
@@ -67,6 +76,7 @@ export async function getPostBySlug(slug: string): Promise<Post | null> {
     tags: data.tags || [],
     author: data.author || 'RetWork編集部',
     theme: isThemeKey(data.theme) ? data.theme : DEFAULT_THEME,
+    place: (data.place as PlaceMeta) || undefined,
     contentHtml: processed.toString(),
   };
 }
