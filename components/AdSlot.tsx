@@ -30,13 +30,13 @@ export default function AdSlot({
   const client = process.env.NEXT_PUBLIC_ADSENSE_CLIENT;
 
   useEffect(() => {
-    if (!client) return;
+    if (!client || !slot) return;
     try {
       (window.adsbygoogle = window.adsbygoogle || []).push({});
     } catch (e) {
       console.warn('[AdSlot] push failed', e);
     }
-  }, [client]);
+  }, [client, slot]);
 
   if (!client) {
     return (
@@ -46,6 +46,10 @@ export default function AdSlot({
       </div>
     );
   }
+
+  // 광고 단위 ID(slot)가 비어 있으면 빈 광고 박스가 공간만 차지함 →
+  //   아무것도 렌더하지 않음. AdSense 승인 후 실제 slot ID 를 넣으면 자동 노출.
+  if (!slot) return null;
 
   return (
     <ins
